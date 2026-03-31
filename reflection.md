@@ -10,13 +10,23 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+My initial UML design split the system into small classes so each part had one clear job. I included `Owner`, `Pet`, `CareTask`, `Scheduler`, and `DailyPlan`.
+
+- `Owner` stores the owner's profile and preferences (like available time and preferred care windows).
+- `Pet` stores pet-specific information (species, age, energy level, medical notes) so planning can be personalized.
+- `CareTask` represents one care activity and holds scheduling details such as duration, priority, due date, and status.
+- `Scheduler` contains the planning logic: it prioritizes tasks, assigns tasks to time slots, and produces a daily plan.
+- `DailyPlan` is the output model that stores scheduled tasks, unscheduled tasks, and explanation notes for why decisions were made.
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+Yes. During implementation, I made a few relationship-focused design changes to reduce ambiguity and future bugs.
+
+- I changed `Scheduler` from handling a single pet to supporting a list of pets. This better matches the real model where one owner can have multiple pets.
+- I added `pet_id` to `CareTask` so each task is explicitly linked to the correct pet when tasks are combined into one daily plan.
+- I added an explicit scheduled structure in `DailyPlan` (`scheduled_items`) to pair each task with its assigned time slot, because taking a `time_slot` argument without storing it would lose scheduling detail.
+
+I made these changes to keep relationships consistent, improve traceability in the schedule output, and prevent logic bottlenecks when scaling from one pet to multi-pet planning.
 
 ---
 
