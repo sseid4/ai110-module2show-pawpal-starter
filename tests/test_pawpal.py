@@ -167,6 +167,69 @@ def test_scheduler_prioritizes_overdue_then_priority_then_duration() -> None:
     assert ordered_ids == ["task_201", "task_202", "task_203"]
 
 
+def test_prioritize_tasks_returns_chronological_order_for_non_overdue_tasks() -> None:
+    today = date.today()
+
+    owner = Owner(
+        owner_id="owner_012",
+        name="Sky",
+        available_minutes_per_day=180,
+        preferred_time_blocks=["morning", "afternoon", "evening"],
+    )
+    pet = Pet(
+        pet_id="pet_014",
+        name="Olive",
+        species="Dog",
+        age=5,
+        energy_level="medium",
+        medical_notes="",
+    )
+
+    due_in_three_days = CareTask(
+        task_id="task_1201",
+        pet_id=pet.pet_id,
+        title="Nail trim",
+        category="hygiene",
+        duration_minutes=10,
+        priority=2,
+        due_date=today + timedelta(days=3),
+        preferred_window="morning",
+    )
+    due_tomorrow = CareTask(
+        task_id="task_1202",
+        pet_id=pet.pet_id,
+        title="Brush coat",
+        category="hygiene",
+        duration_minutes=10,
+        priority=2,
+        due_date=today + timedelta(days=1),
+        preferred_window="morning",
+    )
+    due_in_two_days = CareTask(
+        task_id="task_1203",
+        pet_id=pet.pet_id,
+        title="Ear cleaning",
+        category="hygiene",
+        duration_minutes=10,
+        priority=2,
+        due_date=today + timedelta(days=2),
+        preferred_window="morning",
+    )
+
+    pet.add_task(due_in_three_days)
+    pet.add_task(due_tomorrow)
+    pet.add_task(due_in_two_days)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner=owner)
+    ordered = scheduler.prioritize_tasks(
+        [due_in_three_days, due_tomorrow, due_in_two_days],
+        plan_date=today,
+    )
+
+    assert [task.task_id for task in ordered] == ["task_1202", "task_1203", "task_1201"]
+
+
 def test_scheduler_marks_unscheduled_when_over_capacity() -> None:
     today = date.today()
 

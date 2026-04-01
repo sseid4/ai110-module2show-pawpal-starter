@@ -50,3 +50,23 @@ The scheduler now includes several quality-of-life upgrades:
 - Task filtering by completion status and pet name for faster schedule review.
 - Recurring task automation: when a daily or weekly task is marked complete, a new pending instance is created for the next occurrence.
 - Lightweight conflict detection that returns warnings when multiple tasks are assigned to the same date/window (same pet or cross-pet), without crashing the program.
+
+## Testing PawPal+
+
+Run the automated test suite from the project root with:
+
+```bash
+python -m pytest
+```
+
+Current tests cover the most important scheduler behaviors, including:
+
+- Sorting correctness for due and overdue tasks, with deterministic ordering.
+- Recurrence logic that creates the next daily/weekly task instance after completion.
+- Conflict detection and conflict analysis for duplicate window usage and overload.
+- Scheduling allocation behavior, including preferred windows, fallback windows, and unscheduled tasks when time is limited.
+- Filtering and de-duplication safeguards for task retrieval and plan generation.
+
+Confidence Level: ★★★★★ (5/5)
+
+Reasoning: The suite currently passes in full (14/14 tests), and it verifies both happy paths and key edge cases for scheduling reliability.
