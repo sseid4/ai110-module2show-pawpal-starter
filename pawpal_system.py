@@ -611,8 +611,71 @@ class Scheduler:
             "has_window_conflict": window_overload,
         }
 
+    def detect_task_conflicts(self, plan_date: date) -> List[str]:
+        """Detect lightweight schedule conflicts and return warning messages.
+
+        This method intentionally uses a simple strategy: tasks are considered
+        conflicting when they share the same due date and preferred window
+        label (for example, two "morning" tasks). It does not attempt to model
+        exact start/end timestamps.
+
+        Args:
+            plan_date: The date for which task conflicts should be checked.
+
+        Returns:
+            A list of human-readable warning strings. The list is empty when
+            no conflicts are detected.
+        """
+        tasks_due = [
+            t for t in self.owner.get_all_tasks_due_today(plan_date)
+            if t.status != "done"
+        ]
+
+        buckets: Dict[Tuple[date, str], List[CareTask]] = {}
+        for task in tasks_due:
+            key = (task.due_date, task.preferred_window.lower())
+            buckets.setdefault(key, []).append(task)
+
+        warnings: List[str] = []
+        for (due, window), bucket in buckets.items():
+            if len(bucket) < 2:
+                continue
+
+            pet_ids = {t.pet_id for t in bucket}
+            pet_names = []
+            for pet_id in sorted(pet_ids):
+                pet = self.owner.get_pet(pet_id)
+                pet_names.append(pet.name if pet else pet_id)
+
+            task_titles = ", ".join(t.title for t in bucket)
+            if len(pet_ids) == 1:
+                warnings.append(
+                    f"WARNING: Same-pet time conflict on {due} ({window}) for {pet_names[0]}: {task_titles}"
+                )
+            else:
+                warnings.append(
+                    "WARNING: Cross-pet time conflict on "
+                    f"{due} ({window}) for pets {', '.join(pet_names)}: {task_titles}"
+                )
+
+        return warnings
+
     def _create_next_recurring_task(self, task: CareTask, completed_on: date) -> CareTask | None:
-        """Create the next task instance for recurring daily/weekly/monthly tasks."""
+        """Create the next pending instance of a recurring task.
+
+        The next due date is calculated from the completion date using
+        ``timedelta(days=interval)``, where interval is based on the task
+        frequency (daily/weekly/monthly). A unique task ID is generated to
+        avoid collisions with existing tasks.
+
+        Args:
+            task: The completed recurring task.
+            completed_on: The date the task was completed.
+
+        Returns:
+            A newly created ``CareTask`` for the next occurrence, or ``None``
+            when the frequency is not recurring.
+        """
         interval = self._RECURRING_INTERVAL_DAYS.get(task.frequency.lower())
         if interval is None:
             return None
@@ -642,7 +705,7 @@ class Scheduler:
         )
 
     def _roll_task_to_next_occurrence(self, task: CareTask, completed_on: date) -> CareTask | None:
-        """Return a newly created next recurring task for daily/weekly/monthly frequencies."""
+        """Compatibility wrapper that delegates recurring task creation."""
         return self._create_next_recurring_task(task, completed_on)
 
     def reschedule_task(self, task_id: str, new_date: date) -> bool:
@@ -656,7 +719,18 @@ class Scheduler:
         return False
 
     def mark_task_complete(self, task_id: str) -> bool:
-        """Mark a task as complete."""
+        """Mark a task as done and spawn the next recurring instance when needed.
+
+        For non-recurring tasks, only the original task state is updated.
+        For recurring tasks, the completed task remains ``done`` and a separate
+        pending task is appended for the next occurrence.
+
+        Args:
+            task_id: Identifier of the task to mark complete.
+
+        Returns:
+            ``True`` when the task exists and is updated, otherwise ``False``.
+        """
         self.sync_pets()
         completed_on = date.today()
         for pet in self.pets:

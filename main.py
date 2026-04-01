@@ -75,7 +75,33 @@ def main():
 
     today = date.today()
 
-    # Buddy's tasks
+    # Add tasks intentionally out of order (mixed pet, window, and priority).
+    task7 = CareTask(
+        task_id="task_007",
+        pet_id="pet_003",
+        title="Feed Charlie",
+        category="feeding",
+        duration_minutes=5,
+        priority=1,
+        due_date=today,
+        preferred_window="evening",
+        frequency="daily",
+    )
+    pet3.add_task(task7)
+
+    task3 = CareTask(
+        task_id="task_003",
+        pet_id="pet_002",
+        title="Medication - Morning",
+        category="medication",
+        duration_minutes=10,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+        frequency="daily",
+    )
+    pet2.add_task(task3)
+
     task1 = CareTask(
         task_id="task_001",
         pet_id="pet_001",
@@ -88,6 +114,19 @@ def main():
         frequency="daily",
     )
     pet1.add_task(task1)
+
+    task6 = CareTask(
+        task_id="task_006",
+        pet_id="pet_003",
+        title="Clean cage",
+        category="hygiene",
+        duration_minutes=30,
+        priority=2,
+        due_date=today,
+        preferred_window="morning",
+        frequency="weekly",
+    )
+    pet3.add_task(task6)
 
     task2 = CareTask(
         task_id="task_002",
@@ -102,33 +141,6 @@ def main():
     )
     pet1.add_task(task2)
 
-    # Luna's tasks
-    task3 = CareTask(
-        task_id="task_003",
-        pet_id="pet_002",
-        title="Medication - Morning",
-        category="medication",
-        duration_minutes=10,
-        priority=1,
-        due_date=today,
-        preferred_window="morning",
-        frequency="daily",
-    )
-    pet2.add_task(task3)
-
-    task4 = CareTask(
-        task_id="task_004",
-        pet_id="pet_002",
-        title="Feed Luna",
-        category="feeding",
-        duration_minutes=10,
-        priority=1,
-        due_date=today,
-        preferred_window="evening",
-        frequency="daily",
-    )
-    pet2.add_task(task4)
-
     task5 = CareTask(
         task_id="task_005",
         pet_id="pet_002",
@@ -142,32 +154,45 @@ def main():
     )
     pet2.add_task(task5)
 
-    # Charlie's tasks
-    task6 = CareTask(
-        task_id="task_006",
-        pet_id="pet_003",
-        title="Clean cage",
+    task4 = CareTask(
+        task_id="task_004",
+        pet_id="pet_002",
+        title="Feed Luna",
+        category="feeding",
+        duration_minutes=10,
+        priority=1,
+        due_date=today,
+        preferred_window="evening",
+        frequency="as-needed",
+    )
+    pet2.add_task(task4)
+
+    # Intentional same-time conflicts for demo (lightweight conflict detection).
+    task8 = CareTask(
+        task_id="task_008",
+        pet_id="pet_001",
+        title="Buddy grooming",
         category="hygiene",
-        duration_minutes=30,
+        duration_minutes=25,
         priority=2,
         due_date=today,
         preferred_window="morning",
         frequency="weekly",
     )
-    pet3.add_task(task6)
+    pet1.add_task(task8)
 
-    task7 = CareTask(
-        task_id="task_007",
-        pet_id="pet_003",
-        title="Feed Charlie",
-        category="feeding",
-        duration_minutes=5,
-        priority=1,
+    task9 = CareTask(
+        task_id="task_009",
+        pet_id="pet_002",
+        title="Luna play session",
+        category="exercise",
+        duration_minutes=20,
+        priority=2,
         due_date=today,
-        preferred_window="evening",
+        preferred_window="morning",
         frequency="daily",
     )
-    pet3.add_task(task7)
+    pet2.add_task(task9)
 
     print(f"\n✓ Tasks created and added:")
     print(f"\n  {pet1.name}'s tasks:")
@@ -191,6 +216,49 @@ def main():
     # Generate the daily plan
     daily_plan = scheduler.generate_plan(today)
 
+    # Show sorting logic explicitly from unsorted to sorted list.
+    print_section("SORTING DEMO")
+    all_pending = scheduler.get_filtered_tasks(status="pending", plan_date=today)
+    print("\nUnsorted task IDs:", [t.task_id for t in all_pending])
+
+    sorted_pending = sorted(
+        all_pending,
+        key=lambda t: (
+            0 if t.is_overdue(today) else 1,
+            t.due_date,
+            {"morning": 0, "afternoon": 1, "evening": 2}.get(
+                t.preferred_window.lower(),
+                3,
+            ),
+            t.priority,
+            t.duration_minutes,
+        ),
+    )
+    print("Sorted by time-window/priority:")
+    for task in sorted_pending:
+        pet = owner.get_pet(task.pet_id)
+        pet_name = pet.name if pet else "Unknown"
+        print(
+            f"  - {task.task_id}: {task.title} ({pet_name}) | "
+            f"{task.preferred_window} | P{task.priority} | {task.duration_minutes}min"
+        )
+
+    # Show new filtering logic by completion status and pet name.
+    print_section("FILTERING DEMO")
+    buddy_pending = scheduler.filter_tasks(completion_status="pending", pet_name="Buddy")
+    print("\nPending tasks for Buddy:")
+    for task in buddy_pending:
+        print(f"  - {task.task_id}: {task.title} [{task.status}]")
+
+    scheduler.mark_task_complete("task_004")
+    luna_done = scheduler.filter_tasks(completion_status="done", pet_name="Luna")
+    print("\nDone tasks for Luna:")
+    if luna_done:
+        for task in luna_done:
+            print(f"  - {task.task_id}: {task.title} [{task.status}]")
+    else:
+        print("  - none")
+
     # Print today's schedule
     print(scheduler.get_schedule_summary(daily_plan))
 
@@ -206,7 +274,18 @@ def main():
     print(f"  - Schedule is feasible: {'✓ YES' if not conflict_analysis['has_conflict'] else '✗ NO'}")
 
     if conflict_analysis['has_conflict']:
-        print(f"  - WARNING: Need {conflict_analysis['excess_minutes']} more minutes!")
+        if conflict_analysis['excess_minutes'] > 0:
+            print(f"  - WARNING: Need {conflict_analysis['excess_minutes']} more minutes!")
+        elif conflict_analysis.get('has_window_conflict'):
+            print(f"  - WARNING: Time-window conflict(s): {conflict_analysis.get('window_conflicts', {})}")
+
+    task_conflicts = scheduler.detect_task_conflicts(today)
+    if task_conflicts:
+        print(f"\n✓ Lightweight Task-Conflict Warnings:")
+        for warning in task_conflicts:
+            print(f"  - {warning}")
+    else:
+        print("\n✓ No task time conflicts detected.")
 
     # Print task breakdown by pet
     print(f"\n✓ Tasks by Pet:")

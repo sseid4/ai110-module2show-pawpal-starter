@@ -133,10 +133,10 @@ if st.button("Generate schedule"):
     # Create scheduler and generate plan for today
     scheduler = Scheduler(owner=st.session_state.owner)
     plan = scheduler.generate_plan(date.today())
-    
+
     # Display schedule summary
     st.write(scheduler.get_schedule_summary(plan))
-    
+
     # Show conflict analysis
     conflict = scheduler.get_conflict_analysis(date.today())
     col1, col2, col3, col4 = st.columns(4)
@@ -149,7 +149,7 @@ if st.button("Generate schedule"):
     with col4:
         status = "✓ Feasible" if not conflict["has_conflict"] else "✗ Overload"
         st.metric("Status", status)
-    
+
     # Show scheduling decisions log if available
     if plan.explanation_log:
         with st.expander("📋 Scheduling Decisions", expanded=False):

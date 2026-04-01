@@ -537,3 +537,115 @@ def test_conflict_analysis_reports_window_overload() -> None:
     assert analysis["has_window_conflict"] is True
     assert analysis["has_conflict"] is True
     assert analysis["window_conflicts"]["morning"] == 5
+
+
+def test_detect_task_conflicts_returns_same_pet_warning() -> None:
+    today = date.today()
+
+    owner = Owner(
+        owner_id="owner_010",
+        name="Parker",
+        available_minutes_per_day=120,
+        preferred_time_blocks=["morning", "afternoon", "evening"],
+    )
+    pet = Pet(
+        pet_id="pet_011",
+        name="Finn",
+        species="Dog",
+        age=3,
+        energy_level="high",
+        medical_notes="",
+    )
+
+    task_a = CareTask(
+        task_id="task_1001",
+        pet_id=pet.pet_id,
+        title="Morning walk",
+        category="exercise",
+        duration_minutes=20,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+    )
+    task_b = CareTask(
+        task_id="task_1002",
+        pet_id=pet.pet_id,
+        title="Medication",
+        category="medication",
+        duration_minutes=10,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+    )
+
+    pet.add_task(task_a)
+    pet.add_task(task_b)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner=owner)
+    warnings = scheduler.detect_task_conflicts(today)
+
+    assert len(warnings) == 1
+    assert "Same-pet time conflict" in warnings[0]
+    assert "Finn" in warnings[0]
+
+
+def test_detect_task_conflicts_returns_cross_pet_warning() -> None:
+    today = date.today()
+
+    owner = Owner(
+        owner_id="owner_011",
+        name="Quinn",
+        available_minutes_per_day=120,
+        preferred_time_blocks=["morning", "afternoon", "evening"],
+    )
+    pet_a = Pet(
+        pet_id="pet_012",
+        name="Archie",
+        species="Dog",
+        age=4,
+        energy_level="high",
+        medical_notes="",
+    )
+    pet_b = Pet(
+        pet_id="pet_013",
+        name="Nori",
+        species="Cat",
+        age=2,
+        energy_level="medium",
+        medical_notes="",
+    )
+
+    task_a = CareTask(
+        task_id="task_1101",
+        pet_id=pet_a.pet_id,
+        title="Feed Archie",
+        category="feeding",
+        duration_minutes=10,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+    )
+    task_b = CareTask(
+        task_id="task_1102",
+        pet_id=pet_b.pet_id,
+        title="Feed Nori",
+        category="feeding",
+        duration_minutes=10,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+    )
+
+    pet_a.add_task(task_a)
+    pet_b.add_task(task_b)
+    owner.add_pet(pet_a)
+    owner.add_pet(pet_b)
+
+    scheduler = Scheduler(owner=owner)
+    warnings = scheduler.detect_task_conflicts(today)
+
+    assert len(warnings) == 1
+    assert "Cross-pet time conflict" in warnings[0]
+    assert "Archie" in warnings[0]
+    assert "Nori" in warnings[0]

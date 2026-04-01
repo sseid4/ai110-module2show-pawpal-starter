@@ -39,8 +39,9 @@ I made these changes to keep relationships consistent, improve traceability in t
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+One tradeoff in my scheduler is that conflict detection is intentionally lightweight: it treats tasks as conflicting only when they share the same due date and preferred window label (for example, two "morning" tasks), rather than computing real start/end time overlaps.
+
+This is reasonable for this project because tasks currently do not store exact clock times or durations on a timeline. The lightweight approach gives useful warning messages early, keeps the algorithm simple to understand, and avoids adding complexity that would require a full time-grid model and richer user inputs.
 
 ---
 
