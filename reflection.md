@@ -98,3 +98,15 @@ This is reasonable for this project because tasks currently do not store exact c
 ## Checkpoint Summary
 
 I finalized PawPal+ as a polished project artifact by aligning UI behavior with scheduling logic, updating UML to match implementation, building and validating an automated test suite, and documenting architecture decisions and AI collaboration strategy. I can now clearly explain both the technical design and my role as the human decision-maker in an AI-assisted engineering workflow.
+
+---
+
+## Prompt Comparison (Multi-Model)
+
+For the recurring-task rescheduling problem, I compared responses from GPT-5.3-Codex and another assistant model style (Claude/Gemini-like prompt output) using the same request: "Design Python logic for rolling a weekly recurring task to its next due date with safe task ID generation."
+
+- GPT-5.3-Codex response was more modular: it separated recurrence interval lookup, ID-collision handling, and object creation into clear helper methods.
+- The alternative model response was readable, but more monolithic and less explicit about edge-case handling for duplicate IDs.
+- I chose the more Pythonic, composable approach (helper-method based) because it improved maintainability, testing, and future extension (for monthly/custom frequencies).
+
+Most important takeaway: model comparison is useful, but architectural clarity and testability were stronger decision criteria than raw response length or speed.

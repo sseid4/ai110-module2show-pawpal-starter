@@ -3,6 +3,33 @@ from datetime import date
 
 from pawpal_system import CareTask, Owner, Pet, Scheduler
 
+DATA_FILE = "data.json"
+
+
+def priority_badge(priority: int) -> str:
+    badge_map = {1: "🔴 High", 2: "🟡 Medium", 3: "🟢 Low"}
+    return badge_map.get(priority, f"⚪ P{priority}")
+
+
+def category_badge(category: str) -> str:
+    emoji_map = {
+        "feeding": "🍽️",
+        "medication": "💊",
+        "exercise": "🏃",
+        "hygiene": "🧼",
+        "general": "📌",
+    }
+    return f"{emoji_map.get(category.lower(), '📌')} {category.title()}"
+
+
+def status_badge(status: str) -> str:
+    status_map = {
+        "pending": "🕒 Pending",
+        "done": "✅ Done",
+        "rescheduled": "🔁 Rescheduled",
+    }
+    return status_map.get(status.lower(), status.title())
+
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
 st.title("🐾 PawPal+")
@@ -42,31 +69,45 @@ At minimum, your system should:
 st.divider()
 
 st.subheader("Quick Demo Inputs (UI only)")
-owner_name = st.text_input("Owner name", value="Jordan")
-pet_name = st.text_input("Pet name", value="Mochi")
-species = st.selectbox("Species", ["dog", "cat", "other"])
 
-# Session "vault" guard: create objects once, then reuse on reruns.
+# Session "vault" guard with persisted data loading.
 if "owner" not in st.session_state or not isinstance(st.session_state.owner, Owner):
-    st.session_state.owner = Owner(
-        owner_id="owner_streamlit",
-        name=owner_name,
-        available_minutes_per_day=120,
-        preferred_time_blocks=["morning", "afternoon", "evening"],
-    )
-else:
-    st.session_state.owner.name = owner_name
+    loaded_owner = Owner.load_from_json(DATA_FILE)
+    if loaded_owner is not None:
+        st.session_state.owner = loaded_owner
+        st.session_state.data_loaded = True
+    else:
+        st.session_state.owner = Owner(
+            owner_id="owner_streamlit",
+            name="Jordan",
+            available_minutes_per_day=120,
+            preferred_time_blocks=["morning", "afternoon", "evening"],
+        )
+        st.session_state.data_loaded = False
+
+existing_pet = st.session_state.owner.pets[0] if st.session_state.owner.pets else None
+owner_name = st.text_input("Owner name", value=st.session_state.owner.name)
+pet_name = st.text_input("Pet name", value=existing_pet.name if existing_pet else "Mochi")
+
+species_options = ["dog", "cat", "other"]
+default_species = (existing_pet.species.lower() if existing_pet else "dog")
+species_index = species_options.index(default_species) if default_species in species_options else 2
+species = st.selectbox("Species", species_options, index=species_index)
+
+st.session_state.owner.name = owner_name
 
 if "pet" not in st.session_state or not isinstance(st.session_state.pet, Pet):
-    st.session_state.pet = Pet(
-        pet_id="pet_streamlit",
-        name=pet_name,
-        species=species,
-        age=1,
-        energy_level="medium",
-        medical_notes="",
-    )
-    if st.session_state.owner.get_pet(st.session_state.pet.pet_id) is None:
+    if st.session_state.owner.pets:
+        st.session_state.pet = st.session_state.owner.pets[0]
+    else:
+        st.session_state.pet = Pet(
+            pet_id="pet_streamlit",
+            name=pet_name,
+            species=species,
+            age=1,
+            energy_level="medium",
+            medical_notes="",
+        )
         st.session_state.owner.add_pet(st.session_state.pet)
 else:
     st.session_state.pet.name = pet_name
@@ -76,6 +117,12 @@ st.caption(
     f"Session owner loaded: {st.session_state.owner.name} | "
     f"pet: {st.session_state.pet.name}"
 )
+if st.session_state.get("data_loaded"):
+    st.info("Loaded saved pet/task data from data.json")
+
+if st.button("💾 Save data now"):
+    st.session_state.owner.save_to_json(DATA_FILE)
+    st.success("Saved current owner, pet, and tasks to data.json")
 
 scheduler = Scheduler(owner=st.session_state.owner)
 
@@ -112,6 +159,7 @@ if st.button("Add task"):
         preferred_window=preferred_window,
     )
     st.session_state.pet.add_task(task)
+    st.session_state.owner.save_to_json(DATA_FILE)
     st.success(f"✓ Task '{task_title}' added to {st.session_state.pet.name}!")
 
 # Display current tasks using scheduler filters and sorting.
@@ -138,11 +186,11 @@ if sorted_tasks:
             {
                 "Due": str(t.due_date),
                 "Title": t.title,
-                "Category": t.category,
+                "Category": category_badge(t.category),
                 "Window": t.preferred_window,
                 "Duration (min)": t.duration_minutes,
-                "Priority": t.priority,
-                "Status": t.status,
+                "Priority": priority_badge(t.priority),
+                "Status": status_badge(t.status),
             }
         )
     st.table(task_display)
@@ -167,11 +215,12 @@ if st.button("Generate schedule"):
         {
             "Window": slot,
             "Task": task.title,
+            "Type": category_badge(task.category),
             "Pet": st.session_state.owner.get_pet(task.pet_id).name
             if st.session_state.owner.get_pet(task.pet_id)
             else task.pet_id,
             "Duration (min)": task.duration_minutes,
-            "Priority": task.priority,
+            "Priority": priority_badge(task.priority),
         }
         for task, slot in plan.scheduled_items
     ]
@@ -190,6 +239,8 @@ if st.button("Generate schedule"):
                     else task.pet_id,
                     "Needed (min)": task.duration_minutes,
                     "Preferred Window": task.preferred_window,
+                    "Suggested Next Slot": scheduler.suggest_next_available_slot(task, date.today())
+                    or "No slot available today",
                 }
                 for task in plan.unscheduled_tasks
             ]
@@ -228,3 +279,5 @@ if st.button("Generate schedule"):
         with st.expander("📋 Scheduling Decisions", expanded=False):
             for entry in plan.explanation_log:
                 st.write(entry)
+
+    st.session_state.owner.save_to_json(DATA_FILE)

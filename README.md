@@ -46,10 +46,21 @@ pip install -r requirements.txt
 
 The scheduler now includes several quality-of-life upgrades:
 
-- Priority-aware sorting that favors overdue tasks first, then due date, preferred time window, priority, and shorter duration.
+- Weighted priority scheduling that ranks tasks by priority first, then urgency and time efficiency.
 - Task filtering by completion status and pet name for faster schedule review.
 - Recurring task automation: when a daily or weekly task is marked complete, a new pending instance is created for the next occurrence.
 - Lightweight conflict detection that returns warnings when multiple tasks are assigned to the same date/window (same pet or cross-pet), without crashing the program.
+- Next available slot suggestions for unscheduled tasks.
+- JSON persistence that saves and reloads owner/pet/task data between app runs.
+
+## Agent Mode Build Notes
+
+Agent Mode was used to plan and implement larger multi-file changes in one workflow pass:
+
+- Added `save_to_json` and `load_from_json` on `Owner` to persist nested `Pet` and `CareTask` objects.
+- Updated the Streamlit startup flow in `app.py` to load persisted data automatically from `data.json`.
+- Added weighted-priority sorting plus a `suggest_next_available_slot` scheduling capability.
+- Applied UI polish (priority/category/status badges, conflict warnings, and suggestion output) so algorithmic behavior is visible to users.
 
 ## Testing PawPal+
 
@@ -57,6 +68,12 @@ Run the automated test suite from the project root with:
 
 ```bash
 python -m pytest
+```
+
+Run the Streamlit app:
+
+```bash
+streamlit run app.py
 ```
 
 Current tests cover the most important scheduler behaviors, including:

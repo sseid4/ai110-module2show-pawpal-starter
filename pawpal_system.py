@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 
@@ -26,6 +28,16 @@ class CareTask:
         self.status = "done"
         from datetime import date as date_class
         self.completed_date = date_class.today()
+
+    def priority_label(self) -> str:
+        """Return a human-friendly priority label."""
+        label_map = {1: "High", 2: "Medium", 3: "Low"}
+        return label_map.get(self.priority, f"P{self.priority}")
+
+    def set_priority_from_label(self, label: str) -> None:
+        """Set numeric priority using Low/Medium/High label values."""
+        priority_map = {"high": 1, "medium": 2, "low": 3}
+        self.priority = priority_map.get(label.lower(), self.priority)
 
     def mark_complete(self) -> None:
         """Compatibility alias for marking a task complete."""
@@ -315,6 +327,120 @@ class Owner:
             f"Pending: {self.get_total_pending_tasks()} tasks"
         )
 
+    def _to_dict(self) -> Dict:
+        """Serialize owner, pets, and tasks into JSON-friendly dictionaries."""
+        return {
+            "owner_id": self.owner_id,
+            "name": self.name,
+            "available_minutes_per_day": self.available_minutes_per_day,
+            "preferred_time_blocks": self.preferred_time_blocks,
+            "task_preferences": self.task_preferences,
+            "max_pets": self.max_pets,
+            "email": self.email,
+            "phone": self.phone,
+            "pets": [
+                {
+                    "pet_id": pet.pet_id,
+                    "name": pet.name,
+                    "species": pet.species,
+                    "age": pet.age,
+                    "energy_level": pet.energy_level,
+                    "medical_notes": pet.medical_notes,
+                    "allergies": pet.allergies,
+                    "weight_kg": pet.weight_kg,
+                    "last_vet_visit": pet.last_vet_visit.isoformat() if pet.last_vet_visit else None,
+                    "care_tasks": [
+                        {
+                            "task_id": task.task_id,
+                            "pet_id": task.pet_id,
+                            "title": task.title,
+                            "category": task.category,
+                            "duration_minutes": task.duration_minutes,
+                            "priority": task.priority,
+                            "due_date": task.due_date.isoformat(),
+                            "preferred_window": task.preferred_window,
+                            "status": task.status,
+                            "frequency": task.frequency,
+                            "completed_date": task.completed_date.isoformat() if task.completed_date else None,
+                            "notes": task.notes,
+                            "reminder_set": task.reminder_set,
+                        }
+                        for task in pet.care_tasks
+                    ],
+                }
+                for pet in self.pets
+            ],
+        }
+
+    @classmethod
+    def _from_dict(cls, data: Dict) -> "Owner":
+        """Hydrate an Owner object graph from dictionary data."""
+        owner = cls(
+            owner_id=data.get("owner_id", "owner_streamlit"),
+            name=data.get("name", "Jordan"),
+            available_minutes_per_day=int(data.get("available_minutes_per_day", 120)),
+            preferred_time_blocks=list(data.get("preferred_time_blocks", ["morning", "afternoon", "evening"])),
+            task_preferences=dict(data.get("task_preferences", {})),
+            max_pets=int(data.get("max_pets", 10)),
+            email=data.get("email", ""),
+            phone=data.get("phone", ""),
+        )
+
+        for pet_data in data.get("pets", []):
+            last_vet_visit_raw = pet_data.get("last_vet_visit")
+            pet = Pet(
+                pet_id=pet_data.get("pet_id", "pet_streamlit"),
+                name=pet_data.get("name", "Mochi"),
+                species=pet_data.get("species", "dog"),
+                age=int(pet_data.get("age", 1)),
+                energy_level=pet_data.get("energy_level", "medium"),
+                medical_notes=pet_data.get("medical_notes", ""),
+                allergies=list(pet_data.get("allergies", [])),
+                weight_kg=float(pet_data.get("weight_kg", 0.0)),
+                last_vet_visit=date.fromisoformat(last_vet_visit_raw) if last_vet_visit_raw else None,
+            )
+
+            for task_data in pet_data.get("care_tasks", []):
+                completed_date_raw = task_data.get("completed_date")
+                task = CareTask(
+                    task_id=task_data.get("task_id", "task_unknown"),
+                    pet_id=task_data.get("pet_id", pet.pet_id),
+                    title=task_data.get("title", "Untitled Task"),
+                    category=task_data.get("category", "general"),
+                    duration_minutes=int(task_data.get("duration_minutes", 10)),
+                    priority=int(task_data.get("priority", 2)),
+                    due_date=date.fromisoformat(task_data.get("due_date", date.today().isoformat())),
+                    preferred_window=task_data.get("preferred_window", "morning"),
+                    status=task_data.get("status", "pending"),
+                    frequency=task_data.get("frequency", "daily"),
+                    completed_date=date.fromisoformat(completed_date_raw) if completed_date_raw else None,
+                    notes=task_data.get("notes", ""),
+                    reminder_set=bool(task_data.get("reminder_set", False)),
+                )
+                pet.add_task(task)
+
+            owner.add_pet(pet)
+
+        return owner
+
+    def save_to_json(self, file_path: str = "data.json") -> None:
+        """Persist owner, pet, and task state to JSON."""
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self._to_dict(), indent=2), encoding="utf-8")
+
+    @classmethod
+    def load_from_json(cls, file_path: str = "data.json") -> "Owner | None":
+        """Load owner data from JSON if present; return None when unavailable."""
+        path = Path(file_path)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return cls._from_dict(data)
+        except (json.JSONDecodeError, OSError, ValueError, TypeError):
+            return None
+
 
 @dataclass
 class DailyPlan:
@@ -427,17 +553,56 @@ class Scheduler:
 
         return self.allocate_time_slots(prioritized, plan_date)
 
+    def calculate_task_score(self, task: CareTask, plan_date: date) -> int:
+        """Weighted scoring: priority first, then urgency and duration efficiency."""
+        priority_weights = {1: 300, 2: 200, 3: 100}
+        priority_score = priority_weights.get(task.priority, 50)
+
+        overdue_days = max(0, (plan_date - task.due_date).days)
+        overdue_bonus = min(90, overdue_days * 15)
+
+        due_soon_bonus = 0
+        days_until_due = (task.due_date - plan_date).days
+        if days_until_due >= 0:
+            due_soon_bonus = max(0, 20 - (days_until_due * 5))
+
+        short_task_bonus = max(0, 20 - min(task.duration_minutes, 20))
+
+        return priority_score + overdue_bonus + due_soon_bonus + short_task_bonus
+
     def prioritize_tasks(self, tasks: List[CareTask], plan_date: date) -> List[CareTask]:
-        """Sort tasks by overdue status, due date, window, priority, and duration."""
+        """Sort tasks by weighted priority score first, then date/window/time."""
         preferred_blocks = self.owner.preferred_time_blocks or list(self._DEFAULT_BLOCKS)
         window_rank = {name.lower(): idx for idx, name in enumerate(preferred_blocks)}
 
         def sort_key(task):
-            is_overdue = 0 if task.is_overdue(plan_date) else 1
+            score = self.calculate_task_score(task, plan_date)
             preferred = window_rank.get(task.preferred_window.lower(), len(window_rank))
-            return (is_overdue, task.due_date, preferred, task.priority, task.duration_minutes)
+            return (-score, task.due_date, preferred, task.duration_minutes)
 
         return sorted(tasks, key=sort_key)
+
+    def suggest_next_available_slot(self, task: CareTask, plan_date: date) -> str | None:
+        """Suggest the next available time block for a task based on today's load."""
+        preferred_blocks = self.owner.preferred_time_blocks or list(self._DEFAULT_BLOCKS)
+        capacities = self._get_time_block_capacities(preferred_blocks)
+        load = {block: 0 for block in preferred_blocks}
+
+        todays_tasks = self.owner.get_all_tasks_due_today(plan_date)
+        for current_task in todays_tasks:
+            slot = current_task.preferred_window.lower()
+            if slot in load and current_task.status != "done":
+                load[slot] += current_task.duration_minutes
+
+        preferred = task.preferred_window.lower()
+        if preferred in capacities and (capacities[preferred] - load[preferred]) >= task.duration_minutes:
+            return preferred
+
+        for slot in preferred_blocks:
+            if (capacities[slot] - load[slot]) >= task.duration_minutes:
+                return slot
+
+        return None
 
     def get_filtered_tasks(
         self,

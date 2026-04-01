@@ -105,7 +105,7 @@ def test_scheduler_generates_plan_with_due_tasks() -> None:
     assert len(plan.unscheduled_tasks) == 0
 
 
-def test_scheduler_prioritizes_overdue_then_priority_then_duration() -> None:
+def test_scheduler_prioritizes_priority_then_time_with_weighting() -> None:
     today = date.today()
     yesterday = today - timedelta(days=1)
 
@@ -164,7 +164,7 @@ def test_scheduler_prioritizes_overdue_then_priority_then_duration() -> None:
     plan = scheduler.generate_plan(today)
     ordered_ids = [task.task_id for task, _slot in plan.scheduled_items]
 
-    assert ordered_ids == ["task_201", "task_202", "task_203"]
+    assert ordered_ids == ["task_202", "task_203", "task_201"]
 
 
 def test_prioritize_tasks_returns_chronological_order_for_non_overdue_tasks() -> None:
@@ -712,3 +712,92 @@ def test_detect_task_conflicts_returns_cross_pet_warning() -> None:
     assert "Cross-pet time conflict" in warnings[0]
     assert "Archie" in warnings[0]
     assert "Nori" in warnings[0]
+
+
+def test_scheduler_suggests_next_available_slot() -> None:
+    today = date.today()
+
+    owner = Owner(
+        owner_id="owner_013",
+        name="Robin",
+        available_minutes_per_day=90,
+        preferred_time_blocks=["morning", "afternoon", "evening"],
+    )
+    pet = Pet(
+        pet_id="pet_014",
+        name="Coco",
+        species="Dog",
+        age=2,
+        energy_level="high",
+        medical_notes="",
+    )
+
+    morning_heavy = CareTask(
+        task_id="task_1301",
+        pet_id=pet.pet_id,
+        title="Long walk",
+        category="exercise",
+        duration_minutes=30,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+    )
+    pet.add_task(morning_heavy)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner=owner)
+    new_task = CareTask(
+        task_id="task_1302",
+        pet_id=pet.pet_id,
+        title="Medication",
+        category="medication",
+        duration_minutes=15,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+    )
+
+    suggested = scheduler.suggest_next_available_slot(new_task, today)
+    assert suggested in {"afternoon", "evening"}
+
+
+def test_owner_can_save_and_load_json_state(tmp_path) -> None:
+    today = date.today()
+    data_file = tmp_path / "data.json"
+
+    owner = Owner(
+        owner_id="owner_014",
+        name="Casey",
+        available_minutes_per_day=60,
+        preferred_time_blocks=["morning", "evening"],
+    )
+    pet = Pet(
+        pet_id="pet_015",
+        name="Poppy",
+        species="Cat",
+        age=3,
+        energy_level="medium",
+        medical_notes="",
+    )
+    task = CareTask(
+        task_id="task_1401",
+        pet_id=pet.pet_id,
+        title="Feed Poppy",
+        category="feeding",
+        duration_minutes=10,
+        priority=1,
+        due_date=today,
+        preferred_window="morning",
+    )
+
+    pet.add_task(task)
+    owner.add_pet(pet)
+    owner.save_to_json(str(data_file))
+
+    loaded_owner = Owner.load_from_json(str(data_file))
+
+    assert loaded_owner is not None
+    assert loaded_owner.name == "Casey"
+    assert len(loaded_owner.pets) == 1
+    assert loaded_owner.pets[0].name == "Poppy"
+    assert loaded_owner.pets[0].care_tasks[0].title == "Feed Poppy"
