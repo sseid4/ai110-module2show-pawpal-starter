@@ -73,7 +73,4 @@ Reasoning: The suite currently passes in full (14/14 tests), and it verifies bot
 
 ## 📸 Demo
 
-
-```html
-<a href="course_images/ai110/screenshot.png" target="_blank"><img src='course_images/ai110/screenshot.png' title='PawPal App' width='' alt='PawPal App' class='center-block' /></a>
-```
+[![PawPal App](course_images/ai110/screenshot.png)](course_images/ai110/screenshot.png)
