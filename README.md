@@ -70,3 +70,10 @@ Current tests cover the most important scheduler behaviors, including:
 Confidence Level: ★★★★★ (5/5)
 
 Reasoning: The suite currently passes in full (14/14 tests), and it verifies both happy paths and key edge cases for scheduling reliability.
+
+## 📸 Demo
+
+
+```html
+<a href="/course_images/ai110/your_screenshot_name.png" target="_blank"><img src='/course_images/ai110/your_screenshot_name.png' title='PawPal App' width='' alt='PawPal App' class='center-block' /></a>
+```
