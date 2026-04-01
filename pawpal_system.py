@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict, List, Tuple
 
 
@@ -395,6 +395,11 @@ class Scheduler:
     owner: Owner
     pets: List[Pet] = field(default_factory=list)
 
+    _DEFAULT_BLOCKS: Tuple[str, ...] = ("morning", "afternoon", "evening")
+    _RECURRING_INTERVAL_DAYS: Dict[str, int] = field(
+        default_factory=lambda: {"daily": 1, "weekly": 7, "monthly": 30}
+    )
+
     def sync_pets(self) -> None:
         """Synchronize pets from owner's pet list."""
         self.pets = self.owner.pets
@@ -413,47 +418,106 @@ class Scheduler:
         for pet in self.pets:
             overdue_tasks.extend(pet.get_overdue_tasks(plan_date))
 
-        # Combine and prioritize
-        all_tasks = overdue_tasks + all_due
-        prioritized = self.prioritize_tasks(all_tasks)
+        # Combine and de-duplicate task IDs that might appear in both lists.
+        all_tasks = {}
+        for task in overdue_tasks + all_due:
+            all_tasks[task.task_id] = task
+
+        prioritized = self.prioritize_tasks(list(all_tasks.values()), plan_date)
 
         return self.allocate_time_slots(prioritized, plan_date)
 
-    def prioritize_tasks(self, tasks: List[CareTask]) -> List[CareTask]:
-        """Sort tasks by overdue status, priority, and duration."""
-        from datetime import date as date_class
-        today = date_class.today()
+    def prioritize_tasks(self, tasks: List[CareTask], plan_date: date) -> List[CareTask]:
+        """Sort tasks by overdue status, due date, window, priority, and duration."""
+        preferred_blocks = self.owner.preferred_time_blocks or list(self._DEFAULT_BLOCKS)
+        window_rank = {name.lower(): idx for idx, name in enumerate(preferred_blocks)}
 
         def sort_key(task):
-            is_overdue = 1 if task.is_overdue(today) else 0
-            return (-is_overdue, task.priority, task.duration_minutes)
+            is_overdue = 0 if task.is_overdue(plan_date) else 1
+            preferred = window_rank.get(task.preferred_window.lower(), len(window_rank))
+            return (is_overdue, task.due_date, preferred, task.priority, task.duration_minutes)
 
         return sorted(tasks, key=sort_key)
 
+    def get_filtered_tasks(
+        self,
+        pet_id: str | None = None,
+        status: str | None = None,
+        plan_date: date | None = None,
+    ) -> List[CareTask]:
+        """Filter tasks by pet, status, and due date."""
+        self.sync_pets()
+        tasks = self.owner.get_all_tasks()
+
+        if pet_id is not None:
+            tasks = [t for t in tasks if t.pet_id == pet_id]
+        if status is not None:
+            status_lower = status.lower()
+            tasks = [t for t in tasks if t.status.lower() == status_lower]
+        if plan_date is not None:
+            tasks = [t for t in tasks if t.is_due_today(plan_date) or t.is_overdue(plan_date)]
+
+        return tasks
+
+    def _get_time_block_capacities(self, preferred_blocks: List[str]) -> Dict[str, int]:
+        """Split daily availability across preferred blocks for basic capacity checks."""
+        block_count = len(preferred_blocks)
+        if block_count == 0:
+            return {}
+
+        total = self.owner.available_minutes_per_day
+        base = total // block_count
+        remainder = total % block_count
+
+        capacities: Dict[str, int] = {}
+        for idx, block in enumerate(preferred_blocks):
+            capacities[block] = base + (1 if idx < remainder else 0)
+
+        return capacities
+
     def allocate_time_slots(self, tasks: List[CareTask], plan_date: date) -> DailyPlan:
-        """Allocate tasks to preferred time blocks based on availability."""
+        """Allocate tasks into preferred windows and fallback to available windows."""
         plan = DailyPlan(date=plan_date)
         budget = self.owner.available_minutes_per_day
-        preferred_blocks = self.owner.preferred_time_blocks or ["morning", "afternoon", "evening"]
-        block_index = 0
+        preferred_blocks = self.owner.preferred_time_blocks or list(self._DEFAULT_BLOCKS)
+        block_remaining = self._get_time_block_capacities(preferred_blocks)
 
         for task in tasks:
-            if task.duration_minutes <= budget:
-                time_slot = preferred_blocks[block_index % len(preferred_blocks)]
-                plan.add_plan_item(task, time_slot)
-                budget -= task.duration_minutes
-                plan.explanation_log.append(
-                    f"✓ Scheduled '{task.title}' ({task.pet_id}) in {time_slot} "
-                    f"(priority {task.priority}, {task.duration_minutes} min, "
-                    f"remaining budget: {budget} min)"
-                )
-                block_index += 1
-            else:
+            if task.duration_minutes > budget:
                 plan.unscheduled_tasks.append(task)
                 plan.explanation_log.append(
                     f"✗ Skipped '{task.title}' ({task.pet_id}) — "
                     f"needs {task.duration_minutes} min, only {budget} min left"
                 )
+                continue
+
+            preferred_slot = task.preferred_window.lower()
+            chosen_slot = None
+
+            if preferred_slot in block_remaining and block_remaining[preferred_slot] >= task.duration_minutes:
+                chosen_slot = preferred_slot
+            else:
+                for slot in preferred_blocks:
+                    if block_remaining[slot] >= task.duration_minutes:
+                        chosen_slot = slot
+                        break
+
+            if chosen_slot is None:
+                plan.unscheduled_tasks.append(task)
+                plan.explanation_log.append(
+                    f"✗ Skipped '{task.title}' ({task.pet_id}) — no window has "
+                    f"{task.duration_minutes} min remaining"
+                )
+                continue
+
+            plan.add_plan_item(task, chosen_slot)
+            budget -= task.duration_minutes
+            block_remaining[chosen_slot] -= task.duration_minutes
+            plan.explanation_log.append(
+                f"✓ Scheduled '{task.title}' ({task.pet_id}) in {chosen_slot} "
+                f"(priority {task.priority}, {task.duration_minutes} min, "
+                f"remaining budget: {budget} min)"
+            )
 
         return plan
 
@@ -495,15 +559,47 @@ class Scheduler:
         tasks_due = self.owner.get_all_tasks_due_today(plan_date)
         total_minutes_needed = sum(t.duration_minutes for t in tasks_due)
         available = self.owner.available_minutes_per_day
+        preferred_blocks = self.owner.preferred_time_blocks or list(self._DEFAULT_BLOCKS)
+        window_capacity = self._get_time_block_capacities(preferred_blocks)
+        window_load = {block: 0 for block in preferred_blocks}
+
+        for task in tasks_due:
+            slot = task.preferred_window.lower()
+            if slot in window_load:
+                window_load[slot] += task.duration_minutes
+
+        window_conflicts = {
+            block: window_load[block] - window_capacity[block]
+            for block in preferred_blocks
+            if window_load[block] > window_capacity[block]
+        }
+        total_overload = total_minutes_needed > available
+        window_overload = bool(window_conflicts)
 
         return {
             "tasks_due": len(tasks_due),
             "total_minutes_needed": total_minutes_needed,
             "available_minutes": available,
-            "has_conflict": total_minutes_needed > available,
+            "has_conflict": total_overload or window_overload,
             "excess_minutes": max(0, total_minutes_needed - available),
             "utilization_rate": min(1.0, total_minutes_needed / available) if available > 0 else 0,
+            "window_capacity": window_capacity,
+            "window_load": window_load,
+            "window_conflicts": window_conflicts,
+            "has_window_conflict": window_overload,
         }
+
+    def _roll_task_to_next_occurrence(self, task: CareTask, completed_on: date) -> bool:
+        """Roll a recurring task forward after completion."""
+        interval = self._RECURRING_INTERVAL_DAYS.get(task.frequency.lower())
+        if interval is None:
+            return False
+
+        next_due_date = max(task.due_date, completed_on) + timedelta(days=interval)
+        task.completed_date = completed_on
+        task.due_date = next_due_date
+        task.status = "pending"
+        return True
 
     def reschedule_task(self, task_id: str, new_date: date) -> bool:
         """Reschedule a task to a different date."""
@@ -518,10 +614,12 @@ class Scheduler:
     def mark_task_complete(self, task_id: str) -> bool:
         """Mark a task as complete."""
         self.sync_pets()
+        completed_on = date.today()
         for pet in self.pets:
             for task in pet.care_tasks:
                 if task.task_id == task_id:
                     task.mark_done()
+                    self._roll_task_to_next_occurrence(task, completed_on)
                     return True
         return False
 
