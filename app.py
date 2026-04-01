@@ -1,4 +1,5 @@
 import streamlit as st
+from datetime import date
 
 from pawpal_system import CareTask, Owner, Pet, Scheduler
 
@@ -76,21 +77,27 @@ st.caption(
     f"pet: {st.session_state.pet.name}"
 )
 
+scheduler = Scheduler(owner=st.session_state.owner)
+
 st.markdown("### Tasks")
 st.caption("Add care tasks for your pet. Tasks feed directly into the scheduler.")
-
-from datetime import date
 
 # Priority mapping: string to numeric (1=high, 2=medium, 3=low)
 priority_map = {"high": 1, "medium": 2, "low": 3}
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     task_title = st.text_input("Task title", value="Morning walk")
 with col2:
     duration = st.number_input("Duration (minutes)", min_value=1, max_value=240, value=20)
 with col3:
     priority = st.selectbox("Priority", ["high", "medium", "low"], index=1)
+with col4:
+    category = st.selectbox("Category", ["general", "feeding", "medication", "exercise", "hygiene"])
+with col5:
+    preferred_window = st.selectbox("Preferred window", ["morning", "afternoon", "evening"])
+
+task_due_date = st.date_input("Due date", value=date.today())
 
 if st.button("Add task"):
     # Create a CareTask object and add it to the pet
@@ -98,31 +105,49 @@ if st.button("Add task"):
         task_id=f"{st.session_state.pet.pet_id}_task_{len(st.session_state.pet.care_tasks) + 1}",
         pet_id=st.session_state.pet.pet_id,
         title=task_title,
-        category="general",
+        category=category,
         duration_minutes=int(duration),
         priority=priority_map.get(priority, 2),
-        due_date=date.today(),
-        preferred_window="morning",
+        due_date=task_due_date,
+        preferred_window=preferred_window,
     )
     st.session_state.pet.add_task(task)
     st.success(f"✓ Task '{task_title}' added to {st.session_state.pet.name}!")
 
-# Display current tasks from the pet object
-current_tasks = st.session_state.pet.list_tasks()
-if current_tasks:
-    st.write(f"**Tasks for {st.session_state.pet.name}:**")
-    task_display = [
-        {
-            "Title": t.title,
-            "Duration (min)": t.duration_minutes,
-            "Priority": "H" if t.priority == 1 else ("M" if t.priority == 2 else "L"),
-            "Status": t.status,
-        }
-        for t in current_tasks
-    ]
+# Display current tasks using scheduler filters and sorting.
+st.markdown("#### Task List")
+list_col1, list_col2 = st.columns(2)
+with list_col1:
+    completion_filter = st.selectbox("Filter by status", ["all", "pending", "done", "rescheduled"])
+with list_col2:
+    show_today_only = st.toggle("Only due/overdue today", value=False)
+
+status_arg = None if completion_filter == "all" else completion_filter
+plan_date_arg = date.today() if show_today_only else None
+filtered_tasks = scheduler.get_filtered_tasks(
+    pet_id=st.session_state.pet.pet_id,
+    status=status_arg,
+    plan_date=plan_date_arg,
+)
+sorted_tasks = scheduler.prioritize_tasks(filtered_tasks, date.today())
+
+if sorted_tasks:
+    task_display = []
+    for t in sorted_tasks:
+        task_display.append(
+            {
+                "Due": str(t.due_date),
+                "Title": t.title,
+                "Category": t.category,
+                "Window": t.preferred_window,
+                "Duration (min)": t.duration_minutes,
+                "Priority": t.priority,
+                "Status": t.status,
+            }
+        )
     st.table(task_display)
 else:
-    st.info("No tasks yet. Add one above.")
+    st.info("No tasks match the selected filter.")
 
 st.divider()
 
@@ -131,14 +156,48 @@ st.caption("Generate today's optimized pet care schedule.")
 
 if st.button("Generate schedule"):
     # Create scheduler and generate plan for today
-    scheduler = Scheduler(owner=st.session_state.owner)
     plan = scheduler.generate_plan(date.today())
 
-    # Display schedule summary
-    st.write(scheduler.get_schedule_summary(plan))
+    if plan.scheduled_items:
+        st.success("Schedule generated successfully.")
+    else:
+        st.warning("No tasks were scheduled. Add due tasks or adjust constraints.")
+
+    scheduled_table = [
+        {
+            "Window": slot,
+            "Task": task.title,
+            "Pet": st.session_state.owner.get_pet(task.pet_id).name
+            if st.session_state.owner.get_pet(task.pet_id)
+            else task.pet_id,
+            "Duration (min)": task.duration_minutes,
+            "Priority": task.priority,
+        }
+        for task, slot in plan.scheduled_items
+    ]
+    if scheduled_table:
+        st.markdown("#### Today's Scheduled Tasks")
+        st.table(scheduled_table)
+
+    if plan.unscheduled_tasks:
+        st.markdown("#### Unscheduled Tasks")
+        st.table(
+            [
+                {
+                    "Task": task.title,
+                    "Pet": st.session_state.owner.get_pet(task.pet_id).name
+                    if st.session_state.owner.get_pet(task.pet_id)
+                    else task.pet_id,
+                    "Needed (min)": task.duration_minutes,
+                    "Preferred Window": task.preferred_window,
+                }
+                for task in plan.unscheduled_tasks
+            ]
+        )
 
     # Show conflict analysis
     conflict = scheduler.get_conflict_analysis(date.today())
+    conflict_warnings = scheduler.detect_task_conflicts(date.today())
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Tasks Today", conflict["tasks_due"])
@@ -149,6 +208,20 @@ if st.button("Generate schedule"):
     with col4:
         status = "✓ Feasible" if not conflict["has_conflict"] else "✗ Overload"
         st.metric("Status", status)
+
+    if conflict_warnings:
+        st.warning(
+            "Some tasks share the same time window. Consider moving one task to reduce stress and avoid missed care."
+        )
+        with st.expander("See conflict details", expanded=True):
+            for warning in conflict_warnings:
+                st.write(f"- {warning}")
+    elif conflict["has_conflict"]:
+        st.warning(
+            "Today's workload exceeds available time or window capacity. Check unscheduled tasks and rebalance priorities."
+        )
+    else:
+        st.success("No scheduling conflicts detected for today.")
 
     # Show scheduling decisions log if available
     if plan.explanation_log:

@@ -1,4 +1,4 @@
-const pawpalClassDiagram = String.raw`classDiagram
+classDiagram
     class Owner {
         +String owner_id
         +String name
@@ -118,6 +118,3 @@ const pawpalClassDiagram = String.raw`classDiagram
     Scheduler ..> CareTask : sorts and updates
     Scheduler --> DailyPlan : produces
     DailyPlan "1" --> "many" CareTask : schedules
-`;
-
-export default pawpalClassDiagram;
