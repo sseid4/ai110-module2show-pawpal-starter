@@ -459,6 +459,28 @@ class Scheduler:
 
         return tasks
 
+    def filter_tasks(
+        self,
+        completion_status: str | None = None,
+        pet_name: str | None = None,
+    ) -> List[CareTask]:
+        """Filter tasks by completion status and/or pet name."""
+        self.sync_pets()
+        tasks = self.owner.get_all_tasks()
+
+        if completion_status is not None:
+            status_lower = completion_status.lower()
+            tasks = [t for t in tasks if t.status.lower() == status_lower]
+
+        if pet_name is not None:
+            pet_name_lower = pet_name.lower()
+            pet_ids = {
+                p.pet_id for p in self.owner.pets if p.name.lower() == pet_name_lower
+            }
+            tasks = [t for t in tasks if t.pet_id in pet_ids]
+
+        return tasks
+
     def _get_time_block_capacities(self, preferred_blocks: List[str]) -> Dict[str, int]:
         """Split daily availability across preferred blocks for basic capacity checks."""
         block_count = len(preferred_blocks)
@@ -589,17 +611,39 @@ class Scheduler:
             "has_window_conflict": window_overload,
         }
 
-    def _roll_task_to_next_occurrence(self, task: CareTask, completed_on: date) -> bool:
-        """Roll a recurring task forward after completion."""
+    def _create_next_recurring_task(self, task: CareTask, completed_on: date) -> CareTask | None:
+        """Create the next task instance for recurring daily/weekly/monthly tasks."""
         interval = self._RECURRING_INTERVAL_DAYS.get(task.frequency.lower())
         if interval is None:
-            return False
+            return None
 
-        next_due_date = max(task.due_date, completed_on) + timedelta(days=interval)
-        task.completed_date = completed_on
-        task.due_date = next_due_date
-        task.status = "pending"
-        return True
+        next_due_date = completed_on + timedelta(days=interval)
+        existing_ids = {t.task_id for t in self.owner.get_all_tasks()}
+        base_id = f"{task.task_id}_next_{next_due_date.isoformat()}"
+        next_task_id = base_id
+        suffix = 2
+        while next_task_id in existing_ids:
+            next_task_id = f"{base_id}_{suffix}"
+            suffix += 1
+
+        return CareTask(
+            task_id=next_task_id,
+            pet_id=task.pet_id,
+            title=task.title,
+            category=task.category,
+            duration_minutes=task.duration_minutes,
+            priority=task.priority,
+            due_date=next_due_date,
+            preferred_window=task.preferred_window,
+            status="pending",
+            frequency=task.frequency,
+            notes=task.notes,
+            reminder_set=task.reminder_set,
+        )
+
+    def _roll_task_to_next_occurrence(self, task: CareTask, completed_on: date) -> CareTask | None:
+        """Return a newly created next recurring task for daily/weekly/monthly frequencies."""
+        return self._create_next_recurring_task(task, completed_on)
 
     def reschedule_task(self, task_id: str, new_date: date) -> bool:
         """Reschedule a task to a different date."""
@@ -619,7 +663,9 @@ class Scheduler:
             for task in pet.care_tasks:
                 if task.task_id == task_id:
                     task.mark_done()
-                    self._roll_task_to_next_occurrence(task, completed_on)
+                    next_task = self._roll_task_to_next_occurrence(task, completed_on)
+                    if next_task is not None:
+                        pet.add_task(next_task)
                     return True
         return False
 

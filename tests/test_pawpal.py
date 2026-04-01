@@ -415,9 +415,65 @@ def test_marking_recurring_task_complete_rolls_due_date_forward() -> None:
     success = scheduler.mark_task_complete("task_701")
 
     assert success is True
-    assert recurring_task.status == "pending"
+    assert recurring_task.status == "done"
     assert recurring_task.completed_date == today
-    assert recurring_task.due_date == today + timedelta(days=1)
+
+    all_tasks = owner.get_all_tasks()
+    assert len(all_tasks) == 2
+
+    next_task = [t for t in all_tasks if t.task_id != "task_701"][0]
+    assert next_task.status == "pending"
+    assert next_task.frequency == "daily"
+    assert next_task.due_date == today + timedelta(days=1)
+
+
+def test_marking_weekly_recurring_task_creates_next_week_instance() -> None:
+    today = date.today()
+
+    owner = Owner(
+        owner_id="owner_009",
+        name="Avery",
+        available_minutes_per_day=120,
+        preferred_time_blocks=["morning", "afternoon", "evening"],
+    )
+    pet = Pet(
+        pet_id="pet_010",
+        name="Mochi",
+        species="Rabbit",
+        age=2,
+        energy_level="medium",
+        medical_notes="",
+    )
+
+    recurring_task = CareTask(
+        task_id="task_901",
+        pet_id=pet.pet_id,
+        title="Cage deep clean",
+        category="hygiene",
+        duration_minutes=25,
+        priority=2,
+        due_date=today,
+        preferred_window="afternoon",
+        frequency="weekly",
+    )
+
+    pet.add_task(recurring_task)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner=owner)
+    success = scheduler.mark_task_complete("task_901")
+
+    assert success is True
+    assert recurring_task.status == "done"
+    assert recurring_task.completed_date == today
+
+    all_tasks = owner.get_all_tasks()
+    assert len(all_tasks) == 2
+
+    next_task = [t for t in all_tasks if t.task_id != "task_901"][0]
+    assert next_task.status == "pending"
+    assert next_task.frequency == "weekly"
+    assert next_task.due_date == today + timedelta(days=7)
 
 
 def test_conflict_analysis_reports_window_overload() -> None:
